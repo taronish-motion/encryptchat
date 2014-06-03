@@ -19,6 +19,7 @@
 #include <fcntl.h>
 #include "messagevector.h"
 #include "udp.h"
+#include "tcp.h"
 #define BUFF_SIZE  514
 
 using namespace std;
@@ -32,14 +33,22 @@ char* getHostname();
 void sendDatagram(UDPServer udpserver, const uint16_t &tcpport, 
                     const uint16_t &type, const string &hostname, 
                     const string &username, struct sockaddr_in clientaddr);
+void sigIntHandler(int param);
 
+int interrupted = 1;
 
 
 int main(int argc, char *argv[]){
     string userName = "x", hostName = "x";
-    uint16_t udpPort = 50550, tcpPort = 50551, hostPort;
     int initialTO = 5, maxTO = 60, nfds = 2, result;
+    uint16_t udpPort = 50550, tcpPort = 50551, hostPort;
+    uint8_t *buffer = new uint8_t[BUFF_SIZE];
     int currentTO;
+    struct sockaddr_in clientAddress;
+    socklen_t clientLength;
+    TCPClient clients[16];
+    int clientInd = 0;
+
     parseParams(userName, hostName, udpPort, argv, tcpPort, initialTO,
                 maxTO, hostPort, argc);
     if(userName == "x"){
@@ -56,26 +65,98 @@ int main(int argc, char *argv[]){
     pollFDs[0].events = POLLIN;
     currentTO = initialTO;
 
+    signal(SIGINT, sigIntHandler);
+
     while(1){
-        if(nfds == 2){
-            sendDatagram(udpServer, tcpPort, 0x0001, hostName, 
-                        userName, udpServer.getServerAddress());
+        //check for ^C and service, send closing msg if occured
+        if(interrupted < 0){
+            sendDatagram(udpServer, tcpPort, 3, hostName, 
+                userName, udpServer.getServerAddress());
+            close(udpServer.getFD());
+            break;
         }
+
+        //If no clients yet, broadcast UDP message
+        if(nfds == 2){
+            sendDatagram(udpServer, tcpPort, 1, hostName, 
+                        userName, udpServer.getServerAddress());
+            recvfrom(udpServer.getFD(), buffer, BUFF_SIZE, 0, 
+                    (struct sockaddr *)&clientAddress, 
+                    &clientLength);
+            if(buffer[5] == 0x02){
+                cout << "got reply" << endl;
+            }
+            if(buffer[5] == 0x01){
+                cout << "Received self-discover." << endl;
+            }
+            nfds++;
+        }
+        //Poll all the fds
         cout << "Polling with timeout of " << currentTO << " secs" << endl;
         result = poll(pollFDs, nfds, currentTO*1000);
-        if(0 > result){
-            cout << "poll() failed..." << endl;
+
+        if(0 > result){  //error occured
+            cout << "Exiting poll()" << endl;
+            sendDatagram(udpServer, tcpPort, 3, hostName, 
+                userName, udpServer.getServerAddress());
             exit(-1);
         }
-        if(0 == result){
+        if(0 == result){ //nothing to read in
             if(currentTO*2 > maxTO)
                 currentTO = maxTO;
             else
                 currentTO *= 2;
         }
-        break;
+        else{   //got something on one of the fds
+            if(pollFDs[0].revents & POLLIN){
+                clientLength = sizeof(clientAddress);
+                int recvResult = recvfrom(udpServer.getFD(), buffer, BUFF_SIZE, 0, 
+                                        (struct sockaddr *)&clientAddress, 
+                                        &clientLength);
+                if(recvResult < 0){
+                    cout << "Error reading from UDP socket" << endl;
+                    close(udpServer.getFD());
+                    exit(1);
+                }
+                else{
+                    string newHost, newUser, signature;
+                    uint16_t type, garbage;
+                    CNetworkMessage message;
+                    message.AppendData(buffer, BUFF_SIZE);
+                    if(!message.ExtractStringN(signature, 4)){
+                        printf("Failed to extract signature.\n");
+                        if(signature != "P2PI")
+                            cout << "Not the correct UDP signature." << endl;
+                    }
+                    message.ExtractUInt16(type);
+                    message.ExtractUInt16(garbage);
+                    message.ExtractUInt16(garbage);
+                    message.ExtractString(newHost);
+                    message.ExtractString(newUser);
+                    TCPClient tempClient(clientAddress, newUser, newHost);
+                    if(tempClient.getUsername() != userName || tempClient.getHostname() != hostName){
+                        clients[clientInd] = tempClient;
+                        if(1 == type){
+                            sendDatagram(udpServer, tcpPort, 2, hostName, 
+                                        userName, clientAddress); 
+                        }//if its a discover from some1 else, reply
+                    }//if its not me, add it to the clients
+                    cout << "Recieved UDP datagram type " << type << endl;
+                }//if recvfrom called properly
+                
+            }//if there was an event on UDP server socket
+
+            if(pollFDs[1].revents & POLLIN){
+
+            }//if there was an event on TCP server socket
+        }//poll got an event
+        //break;
     }
 
+    sendDatagram(udpServer, tcpPort, 3, hostName, 
+                userName, udpServer.getServerAddress());
+
+    return 0;
 }//main
 
 
@@ -127,7 +208,7 @@ char* getUsername(){
     for(int i = 0; i < 64; i++){
         uname[i] = ' ';
     }
-    getlogin_r(uname, 64);
+    uname = getenv("USER");
     for(j = 0; j < 64 && uname[j] != ' '; j++){}
     size = j - 1;
     char *uname2 = new char[size];
@@ -155,7 +236,7 @@ void sendDatagram(UDPServer udpserver, const uint16_t &tcpport,
                     const string &username, struct sockaddr_in clientaddr){
     int broadcastEnable = 1, setOptions, sentMsg;
     CNetworkMessage message;
-    message.AppendStringWithoutNULL("P2PIM");
+    message.AppendStringWithoutNULL("P2PI");
     message.AppendUInt16(type);
     message.AppendUInt16(udpserver.getPort());
     message.AppendUInt16(tcpport);
@@ -173,15 +254,54 @@ void sendDatagram(UDPServer udpserver, const uint16_t &tcpport,
     }//if broadcast, set options
 
     
-    sentMsg = sendto(udpserver.getFD(), message.Data(), 
-                        message.Length(), 0, 
-                        (struct sockaddr *)&clientaddr, 
-                        sizeof(clientaddr));
-    
+    sentMsg = sendto(udpserver.getFD(), message.Data(), message.Length(), 0, 
+                        (struct sockaddr *)&clientaddr, sizeof(clientaddr));
+    CNetworkMessage Message = message;
     if(sentMsg < 0){
         cerr << "Unable to call sendto()" << endl;
         close(udpserver.getFD());
         exit(1);
+    }
+
+
+    // string Signature, Hostname, Username;
+    // uint16_t Type, UDPPort, TCPPort;
+    // printf("Messag is %zu bytes long.\n",Message.Length());
+    // DumpData(Message.Data(), Message.Length());
+                              
+    // if(!Message.ExtractStringN(Signature,4)){
+    //     printf("Failed to extract signature.\n");
+    // }
+    // if(!Message.ExtractUInt16(Type)){
+    //     printf("Failed to extract type.\n");
+    // }
+    // if(!Message.ExtractUInt16(UDPPort)){
+    //     printf("Failed to extract UDP port.\n");
+    // }
+    // if(!Message.ExtractUInt16(TCPPort)){
+    //     printf("Failed to extract TCP port.\n");
+    // }
+    // if(!Message.ExtractString(Hostname)){
+    //     printf("Failed to extract hostname.\n");
+    // }
+    // if(!Message.ExtractString(Username)){
+    //     printf("Failed to extract username.\n");
+    // }
+    // printf("\nSignature: %s\n", Signature.c_str());
+    // printf("Type     : %hu\n", Type);
+    // printf("UDP Port : %hu\n", UDPPort);
+    // printf("TCP Port : %hu\n", TCPPort);
+    // printf("Hostname : %s\n", Hostname.c_str());
+    // printf("Username : %s\n", Username.c_str());
+}
+
+
+void sigIntHandler(int param){
+    if(param == SIGINT){
+        interrupted = -1;  
+    }
+    else{
+        interrupted = 1;
     }
 }
 
