@@ -58,6 +58,7 @@ int main(int argc, char *argv[]){
         hostName = getHostname();
     }
     UDPServer udpServer(udpPort);
+    TCPServer tcpServer(tcpPort);
 
     struct pollfd pollFDs[64];
     bzero(pollFDs, sizeof(pollFDs));
@@ -67,6 +68,18 @@ int main(int argc, char *argv[]){
 
     signal(SIGINT, sigIntHandler);
 
+    cout << "Sending discovery, timeout = " << currentTO << "s\n";
+    sendDatagram(udpServer, tcpPort, 1, hostName, 
+                userName, udpServer.getServerAddress());
+    // recvfrom(udpServer.getFD(), buffer, BUFF_SIZE, 0, 
+    //         (struct sockaddr *)&clientAddress, 
+    //         &clientLength);
+    if(buffer[5] == 0x02){
+        cout << "got reply" << endl;
+    }
+    if(buffer[5] == 0x01){
+        cout << "Received self-discover." << endl;
+    }
     while(1){
         //check for ^C and service, send closing msg if occured
         if(interrupted < 0){
@@ -75,28 +88,13 @@ int main(int argc, char *argv[]){
             close(udpServer.getFD());
             break;
         }
-
-        //If no clients yet, broadcast UDP message
-        if(nfds == 2){
-            sendDatagram(udpServer, tcpPort, 1, hostName, 
-                        userName, udpServer.getServerAddress());
-            recvfrom(udpServer.getFD(), buffer, BUFF_SIZE, 0, 
-                    (struct sockaddr *)&clientAddress, 
-                    &clientLength);
-            if(buffer[5] == 0x02){
-                cout << "got reply" << endl;
-            }
-            if(buffer[5] == 0x01){
-                cout << "Received self-discover." << endl;
-            }
-            nfds++;
-        }
+        
         //Poll all the fds
-        cout << "Polling with timeout of " << currentTO << " secs" << endl;
+        //cout << "Polling with timeout of " << currentTO << " secs" << endl;
         result = poll(pollFDs, nfds, currentTO*1000);
 
         if(0 > result){  //error occured
-            cout << "Exiting poll()" << endl;
+            cout << "\nExiting poll(), sending closing message." << endl;
             sendDatagram(udpServer, tcpPort, 3, hostName, 
                 userName, udpServer.getServerAddress());
             exit(-1);
@@ -106,6 +104,21 @@ int main(int argc, char *argv[]){
                 currentTO = maxTO;
             else
                 currentTO *= 2;
+            if(2 == nfds){
+                cout << "Sending discovery, timeout = " << currentTO << "s\n";
+                sendDatagram(udpServer, tcpPort, 1, hostName, 
+                    userName, udpServer.getServerAddress());
+                // recvfrom(udpServer.getFD(), buffer, BUFF_SIZE, 0, 
+                //         (struct sockaddr *)&clientAddress, 
+                //         &clientLength);
+
+                if(buffer[5] == 0x02){
+                    cout << "got reply" << endl;
+                }
+                if(buffer[5] == 0x01){
+                    cout << "Received self-discover." << endl;
+                }
+            }//if no clients
         }
         else{   //got something on one of the fds
             if(pollFDs[0].revents & POLLIN){
@@ -133,13 +146,17 @@ int main(int argc, char *argv[]){
                     message.ExtractUInt16(garbage);
                     message.ExtractString(newHost);
                     message.ExtractString(newUser);
-                    TCPClient tempClient(clientAddress, newUser, newHost);
-                    if(tempClient.getUsername() != userName || tempClient.getHostname() != hostName){
+                    
+                    if(newUser != userName || newHost != hostName){
+                        TCPClient tempClient(clientAddress, newUser, newHost);
                         clients[clientInd] = tempClient;
                         if(1 == type){
                             sendDatagram(udpServer, tcpPort, 2, hostName, 
                                         userName, clientAddress); 
                         }//if its a discover from some1 else, reply
+                        pollFDs[nfds].fd = clients[clientInd].getFD();
+                        pollFDs[nfds].events = POLLIN;
+                        nfds++;
                     }//if its not me, add it to the clients
                     cout << "Recieved UDP datagram type " << type << endl;
                 }//if recvfrom called properly
@@ -147,7 +164,7 @@ int main(int argc, char *argv[]){
             }//if there was an event on UDP server socket
 
             if(pollFDs[1].revents & POLLIN){
-
+                
             }//if there was an event on TCP server socket
         }//poll got an event
         //break;

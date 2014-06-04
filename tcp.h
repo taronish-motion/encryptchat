@@ -32,10 +32,12 @@ public:
 class TCPClient{
 	friend class TCPServer;
 	struct sockaddr_in address;
+	int fileDescriptor;
 	string userName;
 	string hostName;
 
 public:
+	int getFD();
 	string getUsername();
 	string getHostname();
 	struct sockaddr_in getAddr();

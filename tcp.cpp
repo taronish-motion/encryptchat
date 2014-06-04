@@ -25,7 +25,7 @@ TCPServer::TCPServer(uint16_t tcpport){
 	int goodBind = bind(serverFileDescriptor, 
 		(struct sockaddr *)&serverAddress, sizeof(serverAddress));
 	if(goodBind < 0){
-		cout << "Error binding TCP socket" << endl;
+		cout << "Error binding TCP server socket" << endl;
 		close(serverFileDescriptor);
 		exit(1);
 	}
@@ -39,6 +39,10 @@ TCPServer::~TCPServer(){
 
 
 //********** TCP Client Implementations *********************
+int TCPClient::getFD(){
+	return fileDescriptor;
+}
+
 
 string TCPClient::getUsername(){
 	return userName;
@@ -66,6 +70,14 @@ TCPClient::TCPClient(struct sockaddr_in clientaddr, string username, string host
 	address = clientaddr;
 	userName = username;
 	hostName = hostname;
+	fileDescriptor = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	int goodBind = bind(fileDescriptor, 
+		(struct sockaddr *)&clientaddr, sizeof(clientaddr));
+	if(goodBind < 0){
+		cout << "Error binding TCP client socket" << endl;
+		close(fileDescriptor);
+		exit(1);
+	}
 }
 
 
