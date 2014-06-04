@@ -26,7 +26,7 @@ using namespace std;
 
 void parseParams(string &username, string &hostname, uint16_t &udpport,
                 char *av[], uint16_t &tcpport, int &initialto, int &maxto, 
-                uint16_t &hostport, int ac);
+                uint16_t &hostport, int ac, uint16_t &anchorport, string &anchorhost);
 void DumpData(const uint8_t *payload, int length);
 char* getUsername();
 char* getHostname();
@@ -39,9 +39,9 @@ int interrupted = 1;
 
 
 int main(int argc, char *argv[]){
-    string userName = "x", hostName = "x";
+    string userName = "x", hostName = "x", password, anchorHost;
     int initialTO = 5, maxTO = 60, nfds = 2, result;
-    uint16_t udpPort = 50550, tcpPort = 50551, hostPort;
+    uint16_t udpPort = 50550, tcpPort = 50551, hostPort, anchorPort = 50552;
     uint8_t *buffer = new uint8_t[BUFF_SIZE];
     int currentTO;
     struct sockaddr_in clientAddress;
@@ -50,13 +50,18 @@ int main(int argc, char *argv[]){
     int clientInd = 0;
 
     parseParams(userName, hostName, udpPort, argv, tcpPort, initialTO,
-                maxTO, hostPort, argc);
+                maxTO, hostPort, argc, anchorPort, anchorHost);
+
     if(userName == "x"){
         userName = getUsername();
     }
     if(hostName == "x"){
         hostName = getHostname();
     }
+
+    cout << "Enter password to generate private key: ";
+    cin >> password;
+
     UDPServer udpServer(udpPort);
     TCPServer tcpServer(tcpPort);
 
@@ -71,15 +76,7 @@ int main(int argc, char *argv[]){
     cout << "Sending discovery, timeout = " << currentTO << "s\n";
     sendDatagram(udpServer, tcpPort, 1, hostName, 
                 userName, udpServer.getServerAddress());
-    // recvfrom(udpServer.getFD(), buffer, BUFF_SIZE, 0, 
-    //         (struct sockaddr *)&clientAddress, 
-    //         &clientLength);
-    if(buffer[5] == 0x02){
-        cout << "got reply" << endl;
-    }
-    if(buffer[5] == 0x01){
-        cout << "Received self-discover." << endl;
-    }
+
     while(1){
         //check for ^C and service, send closing msg if occured
         if(interrupted < 0){
@@ -112,12 +109,12 @@ int main(int argc, char *argv[]){
                 //         (struct sockaddr *)&clientAddress, 
                 //         &clientLength);
 
-                if(buffer[5] == 0x02){
-                    cout << "got reply" << endl;
-                }
-                if(buffer[5] == 0x01){
-                    cout << "Received self-discover." << endl;
-                }
+                // if(buffer[5] == 0x02){
+                //     cout << "got reply" << endl;
+                // }
+                // if(buffer[5] == 0x01){
+                //     cout << "Received self-discover." << endl;
+                // }
             }//if no clients
         }
         else{   //got something on one of the fds
@@ -157,14 +154,17 @@ int main(int argc, char *argv[]){
                         pollFDs[nfds].fd = clients[clientInd].getFD();
                         pollFDs[nfds].events = POLLIN;
                         nfds++;
+                        cout << "Recieved UDP datagram type " << type << endl;
                     }//if its not me, add it to the clients
-                    cout << "Recieved UDP datagram type " << type << endl;
+                    else{
+                        cout << "Received self-discover." << endl;
+                    }
                 }//if recvfrom called properly
                 
             }//if there was an event on UDP server socket
 
             if(pollFDs[1].revents & POLLIN){
-                
+
             }//if there was an event on TCP server socket
         }//poll got an event
         //break;
@@ -180,41 +180,62 @@ int main(int argc, char *argv[]){
 
 void parseParams(string &username, string &hostname, uint16_t &udpport,
     char *av[], uint16_t &tcpport, int &initialto, int &maxto, 
-    uint16_t &hostport, int ac){
-  if(ac % 2 == 0){ 
-    cerr << "Incorrect parameter format" << endl;
-    exit(1);
-  }
+    uint16_t &hostport, int ac, uint16_t &anchorport, string &anchorhost){
 
-  for(int i = 1; i < ac; i+=2){
-    if(strcmp(av[i], "-u") == 0){ 
-      username = av[i+1];
-    }   
-    if(strcmp(av[i], "-up") == 0){ 
-      udpport = atoi(av[i+1]);
-      if(udpport < 0 || udpport > 65535){
-        cerr << "Invalid UDP port." << endl;
+    bool ahUsed = false;
+    if(ac % 2 == 0){ 
+        cerr << "Incorrect parameter format" << endl;
         exit(1);
-      }   
-    }   
-    if(strcmp(av[i], "-tp") == 0){ 
-      tcpport = atoi(av[i+1]);
-      if(tcpport < 0 || tcpport > 65535){
-        cerr << "Invalid UDP port." << endl;
-        exit(1);
-      }   
-    }   
-    if(strcmp(av[i], "-dt") == 0){ 
-      initialto = atoi(av[i+1]);
-    }   
-    if(strcmp(av[i], "-dm") == 0){ 
-      maxto = atoi(av[i+1]);
-    }   
-    if(strcmp(av[i], "-pp") == 0){ 
-      hostname = strtok(av[i+1], ":");
-      hostport = atoi(strtok(NULL, ""));
-    }   
-  }
+    }
+
+    for(int i = 1; i < ac; i+=2){
+
+
+        if(strcmp(av[i], "-u") == 0){ 
+            username = av[i+1];
+        }   
+        if(strcmp(av[i], "-up") == 0){ 
+            udpport = atoi(av[i+1]);
+            if(udpport < 0 || udpport > 65535){
+                cerr << "Invalid UDP port." << endl;
+                exit(1);
+            }   
+        }   
+        if(strcmp(av[i], "-tp") == 0){ 
+            tcpport = atoi(av[i+1]);
+            if(tcpport < 0 || tcpport > 65535){
+                cerr << "Invalid UDP port." << endl;
+                exit(1);
+            }   
+        }   
+        if(strcmp(av[i], "-dt") == 0){ 
+          initialto = atoi(av[i+1]);
+        }   
+        if(strcmp(av[i], "-dm") == 0){ 
+          maxto = atoi(av[i+1]);
+        }   
+        if(strcmp(av[i], "-pp") == 0){ 
+          hostname = strtok(av[i+1], ":");
+          hostport = atoi(strtok(NULL, ""));
+        }   
+        if(strcmp(av[i], "-ap") == 0 && !ahUsed){ 
+          udpport = atoi(av[i+1]);
+          if(anchorport < 0 || anchorport > 65535){
+            cerr << "Invalid anchor port." << endl;
+            exit(1);
+          }   
+        }
+        if(strcmp(av[i], "-ah") == 0){
+            ahUsed = true;
+            if(strchr(av[i+1], ':') == NULL){
+                anchorhost = av[i+1];
+            }
+            else{
+                anchorhost = strtok(av[i+1], ":");
+                anchorport = atoi(strtok(NULL, ""));
+            }
+        }
+    }
 }//parse parameters
 
 

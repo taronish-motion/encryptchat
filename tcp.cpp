@@ -71,13 +71,17 @@ TCPClient::TCPClient(struct sockaddr_in clientaddr, string username, string host
 	userName = username;
 	hostName = hostname;
 	fileDescriptor = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	int goodBind = bind(fileDescriptor, 
-		(struct sockaddr *)&clientaddr, sizeof(clientaddr));
-	if(goodBind < 0){
-		cout << "Error binding TCP client socket" << endl;
-		close(fileDescriptor);
+	if(fileDescriptor < 0){
+		cout << "Could not call socket() for TCP client." << endl;
 		exit(1);
 	}
+	// int goodBind = bind(fileDescriptor, 
+	// 					(struct sockaddr *)&clientaddr, sizeof(clientaddr));
+	// if(goodBind < 0){
+	// 	cout << "Error binding TCP client socket" << endl;
+	// 	close(fileDescriptor);
+	// 	exit(1);
+	// }
 }
 
 
