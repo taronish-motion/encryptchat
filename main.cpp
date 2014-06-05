@@ -17,6 +17,7 @@
 #include <vector>
 #include <sstream>
 #include <fcntl.h>
+#include "EncryptionLibrary.h"
 #include "messagevector.h"
 #include "udp.h"
 #include "tcp.h"
@@ -34,6 +35,7 @@ void sendDatagram(UDPServer udpserver, const uint16_t &tcpport,
                     const uint16_t &type, const string &hostname, 
                     const string &username, struct sockaddr_in clientaddr);
 void sigIntHandler(int param);
+void sendAuthRequest(const uint64_t &secretnumber, const string &username, UDPServer udpserver);
 
 int interrupted = 1;
 
@@ -48,6 +50,9 @@ int main(int argc, char *argv[]){
     socklen_t clientLength;
     TCPClient clients[16];
     int clientInd = 0;
+    uint64_t secretNumber = GenerateRandomValue();
+
+    PublicEncryptDecrypt(secretNumber, P2PI_TRUST_E, P2PI_TRUST_N);
 
     parseParams(userName, hostName, udpPort, argv, tcpPort, initialTO,
                 maxTO, hostPort, argc, anchorPort, anchorHost);
@@ -73,6 +78,8 @@ int main(int argc, char *argv[]){
 
     signal(SIGINT, sigIntHandler);
 
+    cout << "Sending Request Authenticated Key, timeout = " << currentTO << "s\n";
+    sendAuthRequest(secretNumber, userName, udpServer);
     cout << "Sending discovery, timeout = " << currentTO << "s\n";
     sendDatagram(udpServer, tcpPort, 1, hostName, 
                 userName, udpServer.getServerAddress());
@@ -294,7 +301,7 @@ void sendDatagram(UDPServer udpserver, const uint16_t &tcpport,
     
     sentMsg = sendto(udpserver.getFD(), message.Data(), message.Length(), 0, 
                         (struct sockaddr *)&clientaddr, sizeof(clientaddr));
-    CNetworkMessage Message = message;
+    //CNetworkMessage Message = message;
     if(sentMsg < 0){
         cerr << "Unable to call sendto()" << endl;
         close(udpserver.getFD());
@@ -341,6 +348,30 @@ void sigIntHandler(int param){
     else{
         interrupted = 1;
     }
+}
+
+void sendAuthRequest(const uint64_t &secretnumber, const string &username, UDPServer udpserver){
+    CNetworkMessage message;
+    int setOptions, broadcastEnable = 1;//, sentMsg;
+    message.AppendStringWithoutNULL("P2PI");
+    message.AppendUInt16(10);
+    message.AppendUInt64(secretnumber);
+    message.AppendString(username);
+
+    setOptions = setsockopt(udpserver.getFD(), SOL_SOCKET, SO_BROADCAST,
+                                &broadcastEnable, sizeof(broadcastEnable));
+    if(setOptions < 0){
+        cerr << "Unable to set socket options." << endl;
+        close(udpserver.getFD());
+        exit(1);
+    }
+    // sentMsg = sendto(udpserver.getFD(), message.Data(), message.Length(), 0, 
+    //                     (struct sockaddr *)&(udpserver.getServerAddress()), sizeof(udpserver.getServerAddress()));
+    // if(sentMsg < 0){
+    //     cerr << "Unable to call sendto()" << endl;
+    //     close(udpserver.getFD());
+    //     exit(1);
+    // }
 }
 
 
