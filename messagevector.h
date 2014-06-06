@@ -1,3 +1,6 @@
+#ifndef MESSVEC_H
+    #define MESSVEC_H
+
 #include <stdio.h>
 #include <vector>
 #include <string>
@@ -33,3 +36,6 @@ class CNetworkMessage{
         bool ExtractUInt64(uint64_t &val);
         
 };
+
+
+#endif

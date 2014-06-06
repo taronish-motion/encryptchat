@@ -1,5 +1,6 @@
 #ifndef ENCRYPTIONLIBRARY_H
-#define ENCRYPTIONLIBRARY_H
+	#define ENCRYPTIONLIBRARY_H
+
 #include <stdint.h>
 
 #define P2PI_TRUST_N        4611685846628697223ULL

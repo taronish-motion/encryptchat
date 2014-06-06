@@ -17,6 +17,7 @@
 #include <vector>
 #include <sstream>
 #include <fcntl.h>
+#include <netdb.h>
 #include "EncryptionLibrary.h"
 #include "messagevector.h"
 #include "udp.h"
@@ -35,7 +36,10 @@ void sendDatagram(UDPServer udpserver, const uint16_t &tcpport,
                     const uint16_t &type, const string &hostname, 
                     const string &username, struct sockaddr_in clientaddr);
 void sigIntHandler(int param);
-void sendAuthRequest(const uint64_t &secretnumber, const string &username, UDPServer udpserver);
+void sendAuthRequest(const uint64_t &secretnumber, const string &username, 
+                    UDPServer udpserver, const uint16_t &anchorport);
+string getHostnameFromIP(uint8_t *addr, int addrlen);
+
 
 int interrupted = 1;
 
@@ -51,8 +55,8 @@ int main(int argc, char *argv[]){
     TCPClient clients[16];
     int clientInd = 0;
     uint64_t secretNumber = GenerateRandomValue();
-
-    PublicEncryptDecrypt(secretNumber, P2PI_TRUST_E, P2PI_TRUST_N);
+    secretNumber = secretNumber & 0x00000000ffffffff;
+    uint64_t ownPublicKeyE, ownModN, ownPrivateKeyD;
 
     parseParams(userName, hostName, udpPort, argv, tcpPort, initialTO,
                 maxTO, hostPort, argc, anchorPort, anchorHost);
@@ -67,6 +71,9 @@ int main(int argc, char *argv[]){
     cout << "Enter password to generate private key: ";
     cin >> password;
 
+    StringToPublicNED(password.c_str(), ownModN, ownPublicKeyE, ownPrivateKeyD);
+    PublicEncryptDecrypt(secretNumber, P2PI_TRUST_E, P2PI_TRUST_N);
+
     UDPServer udpServer(udpPort);
     TCPServer tcpServer(tcpPort);
 
@@ -78,8 +85,8 @@ int main(int argc, char *argv[]){
 
     signal(SIGINT, sigIntHandler);
 
-    cout << "Sending Request Authenticated Key, timeout = " << currentTO << "s\n";
-    sendAuthRequest(secretNumber, userName, udpServer);
+    //cout << "Sending Request Authenticated Key, timeout = " << currentTO << "s\n";
+    sendAuthRequest(secretNumber, userName, udpServer, anchorPort);
     cout << "Sending discovery, timeout = " << currentTO << "s\n";
     sendDatagram(udpServer, tcpPort, 1, hostName, 
                 userName, udpServer.getServerAddress());
@@ -350,9 +357,16 @@ void sigIntHandler(int param){
     }
 }
 
-void sendAuthRequest(const uint64_t &secretnumber, const string &username, UDPServer udpserver){
+void sendAuthRequest(const uint64_t &secretnumber, const string &username, 
+                    UDPServer udpserver, const uint16_t &anchorport){
     CNetworkMessage message;
-    int setOptions, broadcastEnable = 1;//, sentMsg;
+    int setOptions, broadcastEnable = 1, sentMsg;
+
+    struct sockaddr_in anchorAddr;
+    anchorAddr.sin_family = AF_INET;
+    anchorAddr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+    anchorAddr.sin_port = htons(anchorport);
+
     message.AppendStringWithoutNULL("P2PI");
     message.AppendUInt16(10);
     message.AppendUInt64(secretnumber);
@@ -365,13 +379,30 @@ void sendAuthRequest(const uint64_t &secretnumber, const string &username, UDPSe
         close(udpserver.getFD());
         exit(1);
     }
-    // sentMsg = sendto(udpserver.getFD(), message.Data(), message.Length(), 0, 
-    //                     (struct sockaddr *)&(udpserver.getServerAddress()), sizeof(udpserver.getServerAddress()));
-    // if(sentMsg < 0){
-    //     cerr << "Unable to call sendto()" << endl;
-    //     close(udpserver.getFD());
-    //     exit(1);
-    // }
+    cout << "Sending Request Authenticated Key" << endl;
+    sentMsg = sendto(udpserver.getFD(), message.Data(), message.Length(), 0, 
+                        (struct sockaddr *)&anchorAddr, sizeof(anchorAddr));
+    if(sentMsg < 0){
+        cerr << "Unable to call sendto()" << endl;
+        close(udpserver.getFD());
+        exit(1);
+    }
+}
+
+string getHostnameFromIP(uint8_t *addr, int addrlen){
+    struct hostent *HostEntry;
+    
+    HostEntry = gethostbyaddr(addr, addrlen, AF_INET);
+    if(NULL != HostEntry){
+        // Resolved hostname
+        return std::string(HostEntry->h_name);
+    }
+    else{
+        // Couldn't resolve, just return IP address as string
+        char AddressBuffer[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, addr, AddressBuffer, INET_ADDRSTRLEN);
+        return AddressBuffer;
+    }
 }
 
 
