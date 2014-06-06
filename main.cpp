@@ -164,11 +164,21 @@ int main(int argc, char *argv[]){
                         if(1 == type){
                             sendDatagram(udpServer, tcpPort, 2, hostName, 
                                         userName, clientAddress); 
+                            cout << "Received discover from " << newUser << "@"
+                                << newHost << endl;
                         }//if its a discover from some1 else, reply
+                        if(2 == type){
+                            cout << "Received reply from " << newUser << "@"
+                                << newHost << endl;
+                        }
+                        if(3 == type){
+                            cout << "Received closing from " << newUser << "@"
+                                << newHost << endl;
+                        }
                         pollFDs[nfds].fd = clients[clientInd].getFD();
                         pollFDs[nfds].events = POLLIN;
                         nfds++;
-                        cout << "Recieved UDP datagram type " << type << endl;
+                        //cout << "Recieved UDP datagram type " << type << endl;
                     }//if its not me, add it to the clients
                     else{
                         cout << "Received self-discover." << endl;
