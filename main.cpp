@@ -57,6 +57,7 @@ int main(int argc, char *argv[]){
     uint64_t secretNumber = GenerateRandomValue();
     secretNumber = secretNumber & 0x00000000ffffffff;
     uint64_t ownPublicKeyE, ownModN, ownPrivateKeyD;
+    bool authenticated = false;
 
     parseParams(userName, hostName, udpPort, argv, tcpPort, initialTO,
                 maxTO, hostPort, argc, anchorPort, anchorHost);
@@ -85,7 +86,7 @@ int main(int argc, char *argv[]){
 
     signal(SIGINT, sigIntHandler);
 
-    //cout << "Sending Request Authenticated Key, timeout = " << currentTO << "s\n";
+    cout << "Sending Request Authenticated Key, timeout = " << currentTO << "s\n";
     sendAuthRequest(secretNumber, userName, udpServer, anchorPort);
     cout << "Sending discovery, timeout = " << currentTO << "s\n";
     sendDatagram(udpServer, tcpPort, 1, hostName, 
@@ -130,6 +131,9 @@ int main(int argc, char *argv[]){
                 //     cout << "Received self-discover." << endl;
                 // }
             }//if no clients
+            if(!authenticated){
+                sendAuthRequest(secretNumber, userName, udpServer, anchorPort);
+            }
         }
         else{   //got something on one of the fds
             if(pollFDs[0].revents & POLLIN){
@@ -174,6 +178,9 @@ int main(int argc, char *argv[]){
                         if(3 == type){
                             cout << "Received closing from " << newUser << "@"
                                 << newHost << endl;
+                        }
+                        if(11 == type){
+                            cout << "Received AKRM" << endl;
                         }
                         pollFDs[nfds].fd = clients[clientInd].getFD();
                         pollFDs[nfds].events = POLLIN;
@@ -389,7 +396,7 @@ void sendAuthRequest(const uint64_t &secretnumber, const string &username,
         close(udpserver.getFD());
         exit(1);
     }
-    cout << "Sending Request Authenticated Key" << endl;
+    //cout << "Sending Request Authenticated Key" << endl;
     sentMsg = sendto(udpserver.getFD(), message.Data(), message.Length(), 0, 
                         (struct sockaddr *)&anchorAddr, sizeof(anchorAddr));
     if(sentMsg < 0){
